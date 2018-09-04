@@ -7,6 +7,7 @@ const defaultPayloadFactory = (context, firstArg) => firstArg;
 const dummyState = {};
 const unsafeSetState = Symbol('SetState');
 const unsafeUpdate = Symbol('Update');
+const isDispatcher = Symbol('Dispatcher');
 let subscriptionUniqueId = 1;
 
 export function create(factory, ...describers) {
@@ -334,7 +335,11 @@ export function component(defaultComponent) {
 
         for (let [propName, propertyDescritor, map] of propertyDescriptors) {
           const rawPropValue = propertyDescritor(descriptionContext);
-          const propValue = map !== false ? map.apply(null, rawPropValue) : rawPropValue;
+          let propValue = map !== false ? map.apply(null, rawPropValue.concat([descriptionContext])) : rawPropValue;
+
+          if (typeof propValue === 'function' && !propValue[isDispatcher]) {
+            propValue = propValue(descriptionContext);
+          }
 
           if (propName === '*') {
             Object.assign(mappedProps, propValue);
@@ -428,11 +433,17 @@ export function withAction(name, store, action, payloadFactory = defaultPayloadF
     }
 
     addProperty(name, function (descriptionContext) {
-      return function (...inputArgs) {
-        let payload = payloadFactory(describingContext, ...inputArgs);
+      return Object.assign(function () {
+        let payload = payloadFactory.apply(null, arguments);
+
+        if (typeof payload === 'function') {
+          payload = payload(descriptionContext);
+        }
 
         return store.dispatch(action, payload);
-      };
+      }, {
+        [isDispatcher]: true
+      });
     }, false);
   };
 }

@@ -13,6 +13,7 @@ A declarative FLUX architecture for React
 1.  Update store props/reducers/middleware on demand
 
 ## Samples
+
 https://codesandbox.io/s/j30rxwnww9
 
 ## References
@@ -34,9 +35,9 @@ Create component factory. create() will return HOC instead Component if no rende
 ### Store: withProp(stateProp, fromStore(parentStore), parentProp)
 
 Declare linked store prop which is linked to a specific prop of parent store.
-Once parent store updated, all linked props of child stores will update as well
+Once parent store updated, all linked props of child stores will update as well.
 Remark: When You update linked props of child stores, parent store's props will update as well. This is 2 ways binding.
-It is helpful to create an action can update multiple stores
+It is helpful to create an action can update multiple stores.
 For sample: Imaging you have 2 stores, one for todo ids, other for todo texts. You want to update both stores with an action
 
 ```jsx harmony
@@ -85,7 +86,7 @@ create(
 
 Declare reducer for the store. Reducer is function, it retrieves (state, action, payload) => newState.
 Reducer will be called if there is any action creator called.
-There are two kinds of action. One can modify state and other only create action payload only
+There are two kinds of action. One can modify state and other only create action payload only.
 
 ```jsx harmony
 const MyActionCreator = text => text;
@@ -120,7 +121,7 @@ withProp(
 );
 ```
 
-You can specific the prop retrieves value from one or more owned props
+You can specific the prop retrieves value from one or more owned props.
 
 ```jsx harmony
 withProp(
@@ -131,7 +132,7 @@ withProp(
 );
 ```
 
-You also specific multiple props at once
+You also specific multiple props at once.
 
 ```jsx harmony
 withProp("*", fromStore(store), state => ({
@@ -142,7 +143,7 @@ withProp("*", fromStore(store), state => ({
 
 ### Component: withAction(name, store, action, payloadFactory)
 
-Declare wired action as component prop
+Declare wired action as component prop.
 
 ```jsx harmony
 const MyStore = create(store({ name: "Peter" }));
@@ -160,7 +161,8 @@ const Component = create(
 You can pass payloadFactory to produce new payload from calling context and input args.
 Calling context has some props: ownedProps (the original props retrieved from parent component),
 mappedProps (the props that component will be used to render)
-payloadFactory has prototype: (callingContext, arg1, arg2, ...) => payload
+payloadFactory has prototype: (callingContext, arg1, arg2, ...) => payload.
+
 ```jsx harmony
 withAction(
   "propName",
