@@ -3,7 +3,7 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
 import React from 'react';
 
 const defaultPropMapper = x => x;
-const defaultPayloadFactory = (ownedProps, mappedProps, inputArgs) => inputArgs[0];
+const defaultPayloadFactory = (context, firstArg) => firstArg;
 const dummyState = {};
 const unsafeSetState = Symbol('SetState');
 const unsafeUpdate = Symbol('Update');
@@ -109,7 +109,7 @@ export function store(initialState) {
       notify();
     }
 
-    function addProperty(name, descriptor, map = name, order = 0) {
+    function addProperty(name, descriptor, map = name, options) {
       if (typeof map === 'string') {
         // create linked prop
         if (!stores.length) {
@@ -117,9 +117,10 @@ export function store(initialState) {
         } else if (stores.length > 1) {
           throw new Error('Linked prop requires only a store');
         }
-        linkedProps.push([name, stores[0], map]);
+        linkedProps.push([name, stores[0], map, options]);
+        stores.length = 0;
       } else {
-        computedProps.push([name, descriptor, selector(map)]);
+        computedProps.push([name, descriptor, selector(map), options]);
       }
     }
 
@@ -296,10 +297,12 @@ export function component(defaultComponent) {
     const hoc = function (component) {
       const propertyDescriptors = [];
       const stores = [];
+      const hocs = [];
       const describingContext = {
         component,
         addStore,
-        addProperty
+        addProperty,
+        addHoc
       };
       describers.forEach(describer => describer(describingContext));
 
@@ -307,15 +310,19 @@ export function component(defaultComponent) {
         stores.push(store);
       }
 
-      function addProperty(name, descriptor, map = defaultPropMapper, order = 0) {
+      function addHoc(hoc) {
+        hocs.push(hoc);
+      }
+
+      function addProperty(name, descriptor, map = defaultPropMapper, options, order = 0) {
         if (typeof map === 'string') {
           const propName = map;
           map = x => x[propName];
         }
 
-        propertyDescriptors.push([name, descriptor, map, order]);
+        propertyDescriptors.push([name, descriptor, map, options, order]);
         // re-sort descriptors
-        propertyDescriptors.sort((a, b) => a[3] - b[3]);
+        propertyDescriptors.sort((a, b) => a[4] - b[4]);
       }
 
       function mapProps(ownedProps) {
@@ -339,7 +346,7 @@ export function component(defaultComponent) {
         return mappedProps;
       }
 
-      return class ComponentWrapper extends React.Component {
+      return hocs.reduce((component, hoc) => hoc(component), class ComponentWrapper extends React.Component {
         constructor(props) {
           super(props);
           // perform first mapping
@@ -361,7 +368,7 @@ export function component(defaultComponent) {
         render() {
           return React.createElement(component, this.mappedProps);
         }
-      };
+      });
     };
 
     if (defaultComponent) {
@@ -374,13 +381,13 @@ export function component(defaultComponent) {
 /**
  * describe prop for component
  */
-export function withProp(name, evaluatorFactory, map) {
+export function withProp(name, evaluatorFactory, map, options) {
   return function ({ addProperty, addStore }) {
     const evaluator = evaluatorFactory({ addStore });
 
     addProperty(name, function (descriptionContext) {
       return evaluator(descriptionContext);
-    }, map);
+    }, map, options);
   };
 }
 
@@ -422,11 +429,17 @@ export function withAction(name, store, action, payloadFactory = defaultPayloadF
 
     addProperty(name, function (descriptionContext) {
       return function (...inputArgs) {
-        let payload = payloadFactory(describingContext.ownedProps, describingContext.mappedProps, inputArgs);
+        let payload = payloadFactory(describingContext, ...inputArgs);
 
         return store.dispatch(action, payload);
       };
     }, false);
+  };
+}
+
+export function withHoc(...hocs) {
+  return function ({ addHoc }) {
+    hocs.forEach(addHoc);
   };
 }
 

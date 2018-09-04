@@ -1,7 +1,7 @@
 {
   "name": "deflux",
-  "version": "1.0.0",
-  "description": "A declarative flux architecture for React",
+  "version": "1.0.1",
+  "description": "A declarative FLUX architecture for React",
   "main": "./dist/index.js",
   "scripts": {
     "test": "jest"
