@@ -1,11 +1,14 @@
 import React from 'react';
 
+export const ComponentType = Symbol('Component');
+export const StoreType = Symbol('Store');
 const defaultPropMapper = x => x;
 const defaultPayloadFactory = (context, firstArg) => firstArg;
 const dummyState = {};
 const unsafeSetState = Symbol('SetState');
 const unsafeUpdate = Symbol('Update');
 const isDispatcher = Symbol('Dispatcher');
+const isAction = Symbol('Action');
 let subscriptionUniqueId = 1;
 
 export function create(factory, ...describers) {
@@ -30,12 +33,8 @@ export function store(initialState) {
     const linkedProps = [];
     const middlewares = [];
     const stores = [];
-    const describingContext = {
-      addReducer,
-      addStore,
-      addMiddleware,
-      addProperty
-    };
+    const initMethods = {};
+
     let currentState = initialState;
     let updatingProps = false;
     let store;
@@ -82,13 +81,12 @@ export function store(initialState) {
         try {
           for (let [destProp, store, sourceProp] of linkedProps) {
             const nextValue = currentState[destProp];
-            const prevValue =
-              sourceProp === '*'
-                ? store.getState()
-                : store.getState()[sourceProp];
+            const prevValue = !sourceProp
+              ? store.getState()
+              : store.getState()[sourceProp];
             // update source store
             if (nextValue !== prevValue) {
-              if (sourceProp === '*') {
+              if (!sourceProp) {
                 store[unsafeSetState](nextValue);
               } else {
                 store[unsafeSetState]({
@@ -114,8 +112,8 @@ export function store(initialState) {
       notify();
     }
 
-    function addProperty(name, descriptor, map = name, options) {
-      if (typeof map === 'string') {
+    function addProperty(name, descriptor, map, options) {
+      if (typeof map !== 'function' && map !== false) {
         // create linked prop
         if (!stores.length) {
           throw new Error('At least store required to create linked prop');
@@ -124,6 +122,26 @@ export function store(initialState) {
         }
         linkedProps.push([name, stores[0], map, options]);
         stores.length = 0;
+      } else if (descriptor[isAction]) {
+        const action = descriptor;
+        const dispatcher = Object.assign(
+          payload => {
+            store.dispatch(action, payload);
+          },
+          {
+            [StoreType]: getStore
+          }
+        );
+
+        if (store) {
+          if (name in store) {
+            // overwrite existing method is not allowed
+          } else {
+            store[name] = dispatcher;
+          }
+        } else {
+          initMethods[name] = dispatcher;
+        }
       } else {
         computedProps.push([name, descriptor, selector(map), options]);
       }
@@ -182,6 +200,10 @@ export function store(initialState) {
       }
     }
 
+    function getStore() {
+      return store;
+    }
+
     function subscribe(subscriber) {
       if (!subscriber.id) {
         subscriber.id = subscriptionUniqueId++;
@@ -223,10 +245,9 @@ export function store(initialState) {
         const prevState = currentState;
         for (let linkedProp of linkedProps) {
           const [destProp, store, sourceProp] = linkedProp;
-          const nextValue =
-            sourceProp === '*'
-              ? store.getState()
-              : store.getState()[sourceProp];
+          const nextValue = !sourceProp
+            ? store.getState()
+            : store.getState()[sourceProp];
 
           if (currentState[destProp] !== nextValue) {
             if (currentState === prevState) {
@@ -249,6 +270,15 @@ export function store(initialState) {
     };
 
     function update(describers) {
+      const describingContext = {
+        objectType: StoreType,
+        getStore,
+        addReducer,
+        addStore,
+        addMiddleware,
+        addProperty
+      };
+
       describers.forEach(describer => describer(describingContext));
 
       const debouncedUpdateProps = debounce(0, updateProps);
@@ -275,6 +305,7 @@ export function store(initialState) {
     update(describers);
 
     return (store = {
+      ...initMethods,
       getState,
       subscribe,
       dispatch,
@@ -312,6 +343,7 @@ export function component(defaultComponent) {
       const stores = [];
       const hocs = [];
       const describingContext = {
+        objectType: ComponentType,
         component,
         addStore,
         addProperty,
@@ -455,39 +487,68 @@ function createPayloadFactory() {
 /**
  * add wired action to component props
  */
-export function withAction(
+export function withAction(name, store, ...args) {
+  return function(describingContext) {
+    const { objectType, addProperty } = describingContext;
+    if (objectType === StoreType) {
+      return addProperty(
+        name,
+        Object.assign(store, { [isAction]: true }),
+        false
+      );
+    } else {
+      let getStore;
+      // withAction('name', store.action, payloadFactory)
+      if (typeof store === 'function') {
+        args.unshift(store);
+        getStore = store[StoreType];
+      } else {
+        getStore = () => {
+          return store;
+        };
+        // withAction('name', store, action, payloadFactory)
+      }
+      return addAction(describingContext, name, getStore, ...args);
+    }
+  };
+}
+
+function addAction(
+  describingContext,
   name,
-  store,
+  getStore,
   action,
   payloadFactory = defaultPayloadFactory
 ) {
-  return function(describingContext) {
-    const { addProperty } = describingContext;
-    if (typeof payloadFactory !== 'function') {
-      payloadFactory = createPayloadFactory(payloadFactory, describingContext);
-    }
+  const { addProperty } = describingContext;
 
-    addProperty(
-      name,
-      function(descriptionContext) {
-        return Object.assign(
-          function() {
-            let payload = payloadFactory.apply(null, arguments);
+  if (typeof payloadFactory === 'string') {
+    const ownedPropName = payloadFactory;
+    payloadFactory = () => ({ ownedProps }) => ownedProps[ownedPropName];
+  } else if (typeof payloadFactory !== 'function') {
+    payloadFactory = createPayloadFactory(payloadFactory, describingContext);
+  }
 
-            if (typeof payload === 'function') {
-              payload = payload(descriptionContext);
-            }
+  addProperty(
+    name,
+    function(descriptionContext) {
+      return Object.assign(
+        function() {
+          let payload = payloadFactory.apply(null, arguments);
 
-            return store.dispatch(action, payload);
-          },
-          {
-            [isDispatcher]: true
+          if (typeof payload === 'function') {
+            payload = payload(descriptionContext);
           }
-        );
-      },
-      false
-    );
-  };
+
+          return getStore().dispatch(action, payload);
+        },
+        {
+          [isDispatcher]: true
+        }
+      );
+    },
+    false
+  );
 }
 
 export function withHoc(...hocs) {

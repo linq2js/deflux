@@ -46,9 +46,9 @@ const TextStore = create(store({}));
 const TodoStore = create(
   store(),
   // link ids to IdStore, it holds id list
-  withProp("ids", fromStore(IdStore), "*"),
+  withProp("ids", fromStore(IdStore)),
   // link texts to TextStore, it holds text list
-  withProp("texts", fromStore(TextStore), "*")
+  withProp("texts", fromStore(TextStore))
 );
 const AddTodoAction = text => state => {
   const id = new Date().getTime();
@@ -161,14 +161,16 @@ const Component = create(
 You can pass payloadFactory to produce new payload from calling context and input args.
 Calling context has some props: ownedProps (the original props retrieved from parent component),
 mappedProps (the props that component will be used to render)
-payloadFactory has prototype: (callingContext, arg1, arg2, ...) => payload.
+payloadFactory has prototype:<br/>
+(arg1, arg2, ...) => payload.
+(arg1, arg2, ...) => callingContext => payload.
 
 ```jsx harmony
 withAction(
   "propName",
   MyStore,
   MyAction,
-  (callingContext, arg1, arg2, arg3) =>
+  (arg1, arg2, arg3) => callingContext =>
     arg1 + arg3 + callingContext.ownedProps.name
 );
 ```
