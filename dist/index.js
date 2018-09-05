@@ -11,6 +11,8 @@ const unsafeSetState = Symbol('SetState');
 const unsafeUpdate = Symbol('Update');
 const isDispatcher = Symbol('Dispatcher');
 const isAction = Symbol('Action');
+const ignore = Symbol('Ignore');
+const noop = () => undefined;
 let subscriptionUniqueId = 1;
 
 export function create(factory, ...describers) {
@@ -356,15 +358,21 @@ export function component(defaultComponent) {
         propertyDescriptors.sort((a, b) => a[4] - b[4]);
       }
 
-      function mapProps(ownedProps) {
+      function mapProps(component, ownedProps) {
         const mappedProps = {};
         const descriptionContext = {
+          component,
           ownedProps,
-          mappedProps
+          mappedProps,
+          // detech prop changed
+          propsChanged: component.prevProps && component.prevProps !== component.props
         };
 
+        component.prevProps = component.props;
+
         for (let [propName, propertyDescritor, map] of propertyDescriptors) {
-          const rawPropValue = propertyDescritor(descriptionContext);
+          const rawPropValue = propertyDescritor(descriptionContext, propName, map);
+          if (rawPropValue === ignore) continue;
           let propValue = map !== false ? map.apply(null, rawPropValue.concat([descriptionContext])) : rawPropValue;
 
           if (typeof propValue === 'function' && !propValue[isDispatcher]) {
@@ -386,7 +394,7 @@ export function component(defaultComponent) {
           super(props);
           // perform first mapping
           // collect all dependency stores if any
-          this.mappedProps = mapProps(props);
+          this.mappedProps = mapProps(this, props);
 
           const handleChange = () => this.setState(dummyState);
 
@@ -394,7 +402,7 @@ export function component(defaultComponent) {
         }
 
         shouldComponentUpdate(nextProps) {
-          const nextMappedProps = mapProps(nextProps);
+          const nextMappedProps = mapProps(this, nextProps);
           if (shallowEqual(nextMappedProps, this.mappedProps, true)) return false;
           this.mappedProps = nextMappedProps;
           return true;
@@ -417,12 +425,28 @@ export function component(defaultComponent) {
  * describe prop for component
  */
 export function withProp(name, evaluatorFactory, map, options) {
-  return function ({ addProperty, addStore }) {
-    const evaluator = evaluatorFactory({ addStore });
+  return function (describingContext) {
+    const { addProperty } = describingContext;
+    const evaluator = evaluatorFactory(describingContext);
 
     addProperty(name, function (descriptionContext) {
       return evaluator(descriptionContext);
     }, map, options);
+  };
+}
+
+/**
+ * get value from component state
+ */
+export function fromState(...props) {
+  return function ({ objectType }) {
+    if (objectType !== ComponentType) {
+      throw new Error('fromState can be used with component()');
+    }
+    return function (descriptionContext) {
+      const state = descriptionContext.component.state || {};
+      return props.map(prop => state[prop]);
+    };
   };
 }
 
@@ -433,6 +457,63 @@ export function fromStore(...stores) {
 
     return function () {
       return stores.map(store => store.getState());
+    };
+  };
+}
+
+export function fromValue(factory) {
+  return function () {
+    return function (descriptionContext) {
+      return [factory(descriptionContext)];
+    };
+  };
+}
+
+export function fromPromise(factory, { defaultValue, shouldUpdate = noop } = {}) {
+  const loadingPayload = [defaultValue, 'loading'];
+  return function ({ objectType }) {
+    if (objectType !== ComponentType) {
+      throw new Error('fromState can be used with component()');
+    }
+    return function (descriptionContext, propName) {
+      const { component } = descriptionContext;
+      const promisePropName = `__${propName}Promise`;
+
+      if (component[promisePropName]) {
+        if (shouldUpdate(descriptionContext, component[promisePropName])) {} else {
+          return component[promisePropName].__payload;
+        }
+      }
+
+      const promise = factory(descriptionContext);
+
+      if (!promise) {
+        return [defaultValue, ''];
+      }
+
+      promise.__payload = loadingPayload;
+
+      component[promisePropName] = promise;
+
+      promise.then(
+      // handle success
+      result => {
+        if (component[promisePropName] === promise) {
+          component[promisePropName].__payload = [result, 'success'];
+          // reload
+          component.setState(dummyState);
+        }
+      },
+      // handle failure
+      error => {
+        if (component[promisePropName] === promise) {
+          component[promisePropName].__payload = [defaultValue, 'failure', error];
+          // reload
+          component.setState(dummyState);
+        }
+      });
+
+      return promise.__payload;
     };
   };
 }
@@ -461,11 +542,21 @@ export function withAction(name, store, ...args) {
     if (objectType === StoreType) {
       return addProperty(name, Object.assign(store, { [isAction]: true }), false);
     } else {
+      // is component type
       let getStore;
       // withAction('name', store.action, payloadFactory)
       if (typeof store === 'function') {
-        args.unshift(store);
-        getStore = store[StoreType];
+        const action = store;
+        if (action[StoreType]) {
+          args.unshift(action);
+          getStore = action[StoreType];
+        } else {
+          action[isDispatcher] = true;
+          addProperty(name, function (descriptionContext) {
+            return action;
+          }, false);
+          return;
+        }
       } else {
         getStore = () => {
           return store;
@@ -492,9 +583,13 @@ function addAction(describingContext, name, getStore, action, payloadFactory = d
       let payload = payloadFactory.apply(null, arguments);
 
       if (typeof payload === 'function') {
-        payload = payload(descriptionContext);
+        payload = payload(descriptionContext, action);
       }
 
+      // support redux action
+      if (!action) {
+        return getStore().dispatch(payload);
+      }
       return getStore().dispatch(action, payload);
     }, {
       [isDispatcher]: true

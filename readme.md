@@ -10,7 +10,10 @@ A declarative FLUX architecture for React
 1.  Support pure function for action / render / component / reducer
 1.  Support linked props
 1.  Support computed props
+1.  Support wired actions for store
+1.  Support many prop sources: Store, Owned props, State, Promise, Literal
 1.  Update store props/reducers/middleware on demand
+1.  Compatible with Redux store
 
 ## Samples
 
@@ -172,5 +175,34 @@ withAction(
   MyAction,
   (arg1, arg2, arg3) => callingContext =>
     arg1 + arg3 + callingContext.ownedProps.name
+);
+```
+
+### Connect Redux store to component
+
+```jsx harmony
+const ReduxIncreaseActionType = 1;
+const ReduxDecreaseActionType = 2;
+const ReduxIncreaseActionCreator = () => ({ type: ReduxIncreaseActionType });
+const ReduxDecreaseActionCreator = () => ({ type: ReduxDecreaseActionType });
+const ReduxReducer = (state = 100, action) => {
+  if (action.type === ReduxIncreaseActionType) return state + 1;
+  if (action.type === ReduxDecreaseActionType) return state - 1;
+  return state;
+};
+
+const ReduxStore = createStore(ReduxReducer);
+
+const ReduxComponent = create(
+  component(props => (
+    <div>
+      <div>{props.counter}</div>
+      <button onClick={() => props.increase()}>Increase</button>
+      <button onClick={() => props.decrease()}>Decrease</button>
+    </div>
+  )),
+  withProp("counter", fromStore(ReduxStore)),
+  withAction("increase", ReduxStore, false, ReduxIncreaseActionCreator),
+  withAction("decrease", ReduxStore, false, ReduxDecreaseActionCreator)
 );
 ```
