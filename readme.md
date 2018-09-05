@@ -14,6 +14,7 @@ A declarative FLUX architecture for React
 1.  Support many prop sources: Store, Owned props, State, Promise, Literal
 1.  Update store props/reducers/middleware on demand
 1.  Compatible with Redux store
+1.  Compatible with Rxjs
 
 ## Samples
 
@@ -204,5 +205,24 @@ const ReduxComponent = create(
   withProp("counter", fromStore(ReduxStore)),
   withAction("increase", ReduxStore, false, ReduxIncreaseActionCreator),
   withAction("decrease", ReduxStore, false, ReduxDecreaseActionCreator)
+);
+```
+
+### Map observable value to component prop
+
+```jsx harmony
+import { fromEvent } from "rxjs";
+const source = fromEvent(document, "click");
+
+const MouseInfo = create(
+  component(props => (
+    <div>
+      Mouse Info:
+      {props.mouseEvent
+        ? `clientX: ${props.mouseEvent.clientX}, ${props.mouseEvent.clientY}`
+        : "Not clicked yet"}
+    </div>
+  )),
+  withProp("mouseEvent", fromObservable(source))
 );
 ```

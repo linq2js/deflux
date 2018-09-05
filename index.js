@@ -343,18 +343,24 @@ export function component(defaultComponent) {
     const hoc = function(component) {
       const propertyDescriptors = [];
       const stores = [];
+      const observables = [];
       const hocs = [];
       const describingContext = {
         objectType: ComponentType,
         component,
         addStore,
         addProperty,
-        addHoc
+        addHoc,
+        addObservable
       };
       describers.forEach(describer => describer(describingContext));
 
       function addStore(store) {
         stores.push(store);
+      }
+
+      function addObservable(observable) {
+        observables.push(observable);
       }
 
       function addHoc(hoc) {
@@ -426,9 +432,34 @@ export function component(defaultComponent) {
             // collect all dependency stores if any
             this.mappedProps = mapProps(this, props);
 
+            const unsubscribes = [];
+
             const handleChange = () => this.setState(dummyState);
 
-            stores.forEach(store => store.subscribe(handleChange));
+            unsubscribes.push(
+              ...stores.map(store => store.subscribe(handleChange))
+            );
+
+            unsubscribes.push(
+              ...observables.map(observable =>
+                observable.subscribe(value => {
+                  observable.__lastValue = value;
+                  handleChange();
+                })
+              )
+            );
+
+            this.unsubscribe = () =>
+              unsubscribes.forEach(unsubscribe => {
+                if (
+                  unsubscribe &&
+                  typeof unsubscribe.unsubscribe === 'function'
+                ) {
+                  unsubscribe.unsubscribe();
+                } else if (typeof unsubscribe === 'function') {
+                  unsubscribe();
+                }
+              });
           }
 
           shouldComponentUpdate(nextProps) {
@@ -437,6 +468,10 @@ export function component(defaultComponent) {
               return false;
             this.mappedProps = nextMappedProps;
             return true;
+          }
+
+          componentWillUnmount() {
+            this.unsubscribe();
           }
 
           render() {
@@ -502,6 +537,15 @@ export function fromValue(factory) {
   return function() {
     return function(descriptionContext) {
       return [factory(descriptionContext)];
+    };
+  };
+}
+
+export function fromObservable(...observables) {
+  return function({ addObservable }) {
+    observables.forEach(observable => addObservable(observable));
+    return function() {
+      return observables.map(observable => observable.__lastValue);
     };
   };
 }
