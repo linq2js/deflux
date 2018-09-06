@@ -8,20 +8,34 @@ const dummyState = {};
 const unsafeSetState = Symbol("SetState");
 const unsafeUpdate = Symbol("Update");
 const isDispatcher = Symbol("Dispatcher");
+const isDescriber = Symbol("Describer");
 const isAction = Symbol("Action");
 const ignore = Symbol("Ignore");
 const noop = () => undefined;
 let subscriptionUniqueId = 1;
 
 export function create(factory, ...describers) {
-  return factory(describers);
+  return factory(
+    describers.map(
+      describer => (describer[isDescriber] ? describer : withHoc(describer))
+    )
+  );
 }
 
 export function update(target, ...describers) {
   if (unsafeUpdate in target) {
-    return target[unsafeUpdate](describers);
+    return target[unsafeUpdate](
+      describers.map(
+        describer => (describer[isDescriber] ? describer : withHoc(describer))
+      )
+    );
   }
   throw new Error("Target object does not support update");
+}
+
+export function createDescriber(f) {
+  f[isDescriber] = true;
+  return f;
 }
 
 /**
@@ -325,7 +339,7 @@ export function store(initialState) {
  * withReducer({ prop: [action1, action2, reducer], prop:[action1, action2, reducer] })
  */
 export function withReducer(...args) {
-  return function(describingContext) {
+  return createDescriber(function(describingContext) {
     const { addReducer } = describingContext;
     if (typeof args[0] === "function") {
       args.forEach(reducer => addReducer(reducer));
@@ -386,16 +400,16 @@ export function withReducer(...args) {
         });
       });
     }
-  };
+  });
 }
 
 /**
  * add middleware to store
  */
 export function withMiddleware(...middlewares) {
-  return function({ addMiddleware }) {
+  return createDescriber(function({ addMiddleware }) {
     middlewares.forEach(addMiddleware);
-  };
+  });
 }
 
 /**
@@ -555,7 +569,7 @@ export function component(defaultComponent) {
  * describe prop for component
  */
 export function withProp(name, evaluatorFactory, map, options) {
-  return function(describingContext) {
+  return createDescriber(function(describingContext) {
     const { addProperty } = describingContext;
     const evaluator = evaluatorFactory(describingContext);
 
@@ -567,7 +581,7 @@ export function withProp(name, evaluatorFactory, map, options) {
       map,
       options
     );
-  };
+  });
 }
 
 /**
@@ -690,7 +704,7 @@ function createPayloadFactory() {
  * add wired action to component props
  */
 export function withAction(name, store, ...args) {
-  return function(describingContext) {
+  return createDescriber(function(describingContext) {
     const { objectType, addProperty } = describingContext;
     if (objectType === StoreType) {
       return addProperty(
@@ -734,7 +748,7 @@ export function withAction(name, store, ...args) {
       }
       return addAction(describingContext, name, getStore, ...args);
     }
-  };
+  });
 }
 
 function addAction(
@@ -780,9 +794,9 @@ function addAction(
 }
 
 export function withHoc(...hocs) {
-  return function({ addHoc }) {
-    hocs.forEach(addHoc);
-  };
+  return createDescriber(function({ addHoc }) {
+    hocs.forEach(hoc => addHoc(hoc));
+  });
 }
 
 export function shallowEqual(value1, value2, ignoreFuncs) {
