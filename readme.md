@@ -13,7 +13,7 @@ A declarative FLUX architecture for React
 1.  Support wired actions for store
 1.  Support many prop sources: Store, Owned props, State, Promise, Literal
 1.  Update store props/reducers/middleware on demand
-1.  Compatible with Redux store
+1.  Compatible with Redux store/reducer/middleware
 1.  Compatible with Rxjs
 
 ## Samples

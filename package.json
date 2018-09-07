@@ -1,6 +1,6 @@
 {
   "name": "deflux",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "A declarative FLUX architecture for React",
   "main": "./dist/index.js",
   "scripts": {
