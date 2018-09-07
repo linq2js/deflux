@@ -2,6 +2,7 @@ import React from "react";
 
 export const ComponentType = Symbol("Component");
 export const StoreType = Symbol("Store");
+const initAction = Symbol("InitAction");
 const defaultPropMapper = x => x;
 const defaultPayloadFactory = (context, firstArg) => firstArg;
 const dummyState = {};
@@ -11,7 +12,11 @@ const isDispatcher = Symbol("Dispatcher");
 const isDescriber = Symbol("Describer");
 const isAction = Symbol("Action");
 const ignore = Symbol("Ignore");
+const isObservableListener = Symbol("ObservableListener");
 const noop = () => undefined;
+const isPlainObject = val =>
+  !!val && typeof val === "object" && val.constructor === Object;
+
 let subscriptionUniqueId = 1;
 
 export function create(factory, ...describers) {
@@ -38,6 +43,25 @@ export function createDescriber(f) {
   return f;
 }
 
+export function createObservable(
+  target,
+  { valueSelector = (target, firstArg) => firstArg, subscribe } = {}
+) {
+  return {
+    subscribe(subscriber) {
+      function subscriberWrapper(...args) {
+        const value = valueSelector(target, ...args);
+        return subscriber(value);
+      }
+
+      if (subscribe) {
+        return subscribe(target, subscriberWrapper);
+      }
+      return (target.listen || target.subscribe)(subscriberWrapper);
+    }
+  };
+}
+
 /**
  * create a store
  */
@@ -49,8 +73,10 @@ export function store(initialState) {
     const linkedProps = [];
     const middlewares = [];
     const stores = [];
+    const observables = [];
+    const observableMappings = [];
     const initMethods = {};
-
+    let initialized = false;
     let currentState = initialState;
     let updatingProps = false;
     let store;
@@ -128,7 +154,51 @@ export function store(initialState) {
       notify();
     }
 
+    function addObservable(observable) {
+      observables.push(observable);
+    }
+
+    const handleObservableChanged = debounce(0, () => {
+      let nextState = currentState;
+      observableMappings.forEach(({ observables, prop, map }) => {
+        const nextValue = map.apply(
+          null,
+          observables.map(observable => observable.__lastValue)
+        );
+
+        if (nextValue !== nextState[prop]) {
+          if (nextState === currentState) {
+            nextState = {
+              ...currentState
+            };
+          }
+          nextState[prop] = nextValue;
+        }
+      });
+      setState(nextState);
+    });
+
     function addProperty(name, descriptor, map, options) {
+      if (observables.length) {
+        if (!map) {
+          map = defaultPropMapper;
+        }
+        observableMappings.push({
+          prop: name,
+          map,
+          observables: observables.slice(0)
+        });
+        observables.forEach(observable => {
+          observable.subscribe(value => {
+            observable.__lastValue = value;
+            handleObservableChanged();
+          });
+        });
+
+        observables.length = 0;
+        return;
+      }
+
       if (typeof map !== "function" && map !== false) {
         // create linked prop
         if (!stores.length) {
@@ -163,7 +233,52 @@ export function store(initialState) {
       }
     }
 
+    function callMiddleware(action, payload) {
+      // action creator result
+      // call middlewares and reducers
+      const pendingDispatchings = [];
+      const prevState = currentState;
+      currentState = middlewares.reduce(
+        (next, middleware) => {
+          return function(action, payload) {
+            return middleware(store)(next)(action, payload);
+          };
+        },
+        (action, payload) => {
+          return reducers.reduce((state, reducer) => {
+            const reducerResult = reducer(state, action, payload);
+            // support lazy dispatching inside reducer
+            if (typeof reducerResult === "function") {
+              reducerResult((...args) => pendingDispatchings.push(args));
+              return state;
+            }
+            return reducerResult;
+          }, currentState);
+        }
+      )(action, payload);
+
+      if (currentState !== prevState) {
+        updateLinkedProps();
+        recompute();
+        notify();
+      }
+
+      if (pendingDispatchings.length) {
+        for (let [action, payload] of pendingDispatchings) {
+          dispatch(action, payload);
+        }
+      }
+    }
+
+    function wire(context, { listenToUpdate, stateProp } = {}) {}
+
     function dispatch(action, payload) {
+      if (isPlainObject(action)) {
+        // is redux action
+        const { type, ...payload } = action;
+        callMiddleware(type, payload);
+        return;
+      }
       let actionResult = action(payload);
       if (typeof actionResult === "function") {
         actionResult = actionResult(currentState);
@@ -179,40 +294,7 @@ export function store(initialState) {
           }
         }
       } else {
-        // action creator result
-        // call middlewares and reducers
-        const pendingDispatchings = [];
-        const prevState = currentState;
-        currentState = middlewares.reduce(
-          (next, middleware) => {
-            return function(action, payload) {
-              return middleware(store)(next)(action, payload);
-            };
-          },
-          (action, payload) => {
-            return reducers.reduce((state, reducer) => {
-              const reducerResult = reducer(state, action, payload);
-              // support lazy dispatching inside reducer
-              if (typeof reducerResult === "function") {
-                reducerResult((...args) => pendingDispatchings.push(args));
-                return state;
-              }
-              return reducerResult;
-            }, currentState);
-          }
-        )(action, actionResult);
-
-        if (currentState !== prevState) {
-          updateLinkedProps();
-          recompute();
-          notify();
-        }
-
-        if (pendingDispatchings.length) {
-          for (let [action, payload] of pendingDispatchings) {
-            dispatch(action, payload);
-          }
-        }
+        callMiddleware(action, actionResult);
       }
     }
 
@@ -292,11 +374,30 @@ export function store(initialState) {
         addReducer,
         addStore,
         addMiddleware,
-        addProperty
+        addProperty,
+        addObservable
       };
+      const isFirstTime = !initialized;
+      const postUpdates = [];
+      initialized = true;
+      const startReducer = reducers.length;
 
       describers.forEach(describer => describer(describingContext));
 
+      // call init action
+      const initializedState = reducers
+        .slice(startReducer)
+        .reduce(
+          (state, reducer) => reducer(state, initAction, {}),
+          currentState
+        );
+      if (currentState !== initializedState) {
+        if (isFirstTime) {
+          currentState = initializedState;
+        } else {
+          postUpdates.push(notify);
+        }
+      }
       const debouncedUpdateProps = debounce(0, updateProps);
 
       if (linkedProps.length) {
@@ -316,6 +417,8 @@ export function store(initialState) {
       if (computedProps.length) {
         recompute();
       }
+
+      postUpdates.forEach(update => update());
     }
 
     update(describers);
@@ -518,12 +621,12 @@ export function component(defaultComponent) {
             );
 
             unsubscribes.push(
-              ...observables.map(observable =>
-                observable.subscribe(value => {
+              ...observables.map(observable => {
+                return observable.subscribe(value => {
                   observable.__lastValue = value;
                   handleChange();
-                })
-              )
+                });
+              })
             );
 
             this.unsubscribe = () =>
@@ -621,9 +724,14 @@ export function fromValue(factory) {
 export function fromObservable(...observables) {
   return function({ addObservable }) {
     observables.forEach(observable => addObservable(observable));
-    return function() {
-      return observables.map(observable => observable.__lastValue);
-    };
+    return Object.assign(
+      function() {
+        return observables.map(observable => observable.__lastValue);
+      },
+      {
+        [isObservableListener]: true
+      }
+    );
   };
 }
 
@@ -869,5 +977,33 @@ export function selector(...funcs) {
   return function(...args) {
     const mappedArgs = argSelectors.map(x => x.apply(null, args));
     return wrapper.apply(null, mappedArgs);
+  };
+}
+
+export function reduxReducer(reducer) {
+  return function(state, action, payload) {
+    if (isPlainObject(payload)) {
+      const reduxAction = {
+        ...payload,
+        type: action
+      };
+
+      return reducer(state, reduxAction);
+    }
+    return state;
+  };
+}
+
+export function reduxMiddleware(middleware) {
+  return store => next => (action, payload) => {
+    if (isPlainObject(payload)) {
+      return middleware(store)(reduxAction => {
+        return next(action.type, action);
+      })({
+        ...payload,
+        type: action
+      });
+    }
+    return next(action, payload);
   };
 }
