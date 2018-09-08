@@ -1,19 +1,25 @@
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
-import React from "react";
+function _objectWithoutProperties(obj, keys) { var target = {}; for (var i in obj) { if (keys.indexOf(i) >= 0) continue; if (!Object.prototype.hasOwnProperty.call(obj, i)) continue; target[i] = obj[i]; } return target; }
 
-export const ComponentType = Symbol("Component");
-export const StoreType = Symbol("Store");
+import React from 'react';
+
+export const ComponentType = Symbol('Component');
+export const StoreType = Symbol('Store');
+const initAction = Symbol('InitAction');
 const defaultPropMapper = x => x;
 const defaultPayloadFactory = (context, firstArg) => firstArg;
 const dummyState = {};
-const unsafeSetState = Symbol("SetState");
-const unsafeUpdate = Symbol("Update");
-const isDispatcher = Symbol("Dispatcher");
-const isDescriber = Symbol("Describer");
-const isAction = Symbol("Action");
-const ignore = Symbol("Ignore");
+const unsafeSetState = Symbol('SetState');
+const unsafeUpdate = Symbol('Update');
+const isDispatcher = Symbol('Dispatcher');
+const isDescriber = Symbol('Describer');
+const isAction = Symbol('Action');
+const ignore = Symbol('Ignore');
+const isObservableListener = Symbol('ObservableListener');
 const noop = () => undefined;
+const isPlainObject = val => !!val && typeof val === 'object' && val.constructor === Object;
+
 let subscriptionUniqueId = 1;
 
 export function create(factory, ...describers) {
@@ -24,12 +30,28 @@ export function update(target, ...describers) {
   if (unsafeUpdate in target) {
     return target[unsafeUpdate](describers.map(describer => describer[isDescriber] ? describer : withHoc(describer)));
   }
-  throw new Error("Target object does not support update");
+  throw new Error('Target object does not support update');
 }
 
 export function createDescriber(f) {
   f[isDescriber] = true;
   return f;
+}
+
+export function createObservable(target, { valueSelector = (target, firstArg) => firstArg, subscribe } = {}) {
+  return {
+    subscribe(subscriber) {
+      function subscriberWrapper(...args) {
+        const value = valueSelector(target, ...args);
+        return subscriber(value);
+      }
+
+      if (subscribe) {
+        return subscribe(target, subscriberWrapper);
+      }
+      return (target.listen || target.subscribe)(subscriberWrapper);
+    }
+  };
 }
 
 /**
@@ -43,8 +65,10 @@ export function store(initialState) {
     const linkedProps = [];
     const middlewares = [];
     const stores = [];
+    const observables = [];
+    const observableMappings = [];
     const initMethods = {};
-
+    let initialized = false;
     let currentState = initialState;
     let updatingProps = false;
     let store;
@@ -117,13 +141,52 @@ export function store(initialState) {
       notify();
     }
 
+    function addObservable(observable) {
+      observables.push(observable);
+    }
+
+    const handleObservableChanged = debounce(0, () => {
+      let nextState = currentState;
+      observableMappings.forEach(({ observables, prop, map }) => {
+        const nextValue = map.apply(null, observables.map(observable => observable.__lastValue));
+
+        if (nextValue !== nextState[prop]) {
+          if (nextState === currentState) {
+            nextState = _extends({}, currentState);
+          }
+          nextState[prop] = nextValue;
+        }
+      });
+      setState(nextState);
+    });
+
     function addProperty(name, descriptor, map, options) {
-      if (typeof map !== "function" && map !== false) {
+      if (observables.length) {
+        if (!map) {
+          map = defaultPropMapper;
+        }
+        observableMappings.push({
+          prop: name,
+          map,
+          observables: observables.slice(0)
+        });
+        observables.forEach(observable => {
+          observable.subscribe(value => {
+            observable.__lastValue = value;
+            handleObservableChanged();
+          });
+        });
+
+        observables.length = 0;
+        return;
+      }
+
+      if (typeof map !== 'function' && map !== false) {
         // create linked prop
         if (!stores.length) {
-          throw new Error("At least store required to create linked prop");
+          throw new Error('At least store required to create linked prop');
         } else if (stores.length > 1) {
-          throw new Error("Linked prop requires only a store");
+          throw new Error('Linked prop requires only a store');
         }
         linkedProps.push([name, stores[0], map, options]);
         stores.length = 0;
@@ -149,53 +212,66 @@ export function store(initialState) {
       }
     }
 
+    function callMiddleware(action, payload) {
+      // action creator result
+      // call middlewares and reducers
+      const pendingDispatchings = [];
+      const prevState = currentState;
+      currentState = middlewares.reduce((next, middleware) => {
+        return function (action, payload) {
+          return middleware(store)(next)(action, payload);
+        };
+      }, (action, payload) => {
+        return reducers.reduce((state, reducer) => {
+          const reducerResult = reducer(state, action, payload);
+          // support lazy dispatching inside reducer
+          if (typeof reducerResult === 'function') {
+            reducerResult((...args) => pendingDispatchings.push(args));
+            return state;
+          }
+          return reducerResult;
+        }, currentState);
+      })(action, payload);
+
+      if (currentState !== prevState) {
+        updateLinkedProps();
+        recompute();
+        notify();
+      }
+
+      if (pendingDispatchings.length) {
+        for (let [action, payload] of pendingDispatchings) {
+          dispatch(action, payload);
+        }
+      }
+    }
+
+    function wire(context, { listenToUpdate, stateProp } = {}) {}
+
     function dispatch(action, payload) {
+      if (isPlainObject(action)) {
+        // is redux action
+        const { type } = action,
+              payload = _objectWithoutProperties(action, ['type']);
+        callMiddleware(type, payload);
+        return;
+      }
       let actionResult = action(payload);
-      if (typeof actionResult === "function") {
+      if (typeof actionResult === 'function') {
         actionResult = actionResult(currentState);
-        if (typeof actionResult === "function") {
+        if (typeof actionResult === 'function') {
           actionResult = actionResult(dispatch, getState);
           return actionResult;
         } else {
           // new state
-          if (actionResult && typeof actionResult.then === "function") {
+          if (actionResult && typeof actionResult.then === 'function') {
             return actionResult.then(setState);
           } else {
             setState(actionResult);
           }
         }
       } else {
-        // action creator result
-        // call middlewares and reducers
-        const pendingDispatchings = [];
-        const prevState = currentState;
-        currentState = middlewares.reduce((next, middleware) => {
-          return function (action, payload) {
-            return middleware(store)(next)(action, payload);
-          };
-        }, (action, payload) => {
-          return reducers.reduce((state, reducer) => {
-            const reducerResult = reducer(state, action, payload);
-            // support lazy dispatching inside reducer
-            if (typeof reducerResult === "function") {
-              reducerResult((...args) => pendingDispatchings.push(args));
-              return state;
-            }
-            return reducerResult;
-          }, currentState);
-        })(action, actionResult);
-
-        if (currentState !== prevState) {
-          updateLinkedProps();
-          recompute();
-          notify();
-        }
-
-        if (pendingDispatchings.length) {
-          for (let [action, payload] of pendingDispatchings) {
-            dispatch(action, payload);
-          }
-        }
+        callMiddleware(action, actionResult);
       }
     }
 
@@ -271,11 +347,25 @@ export function store(initialState) {
         addReducer,
         addStore,
         addMiddleware,
-        addProperty
+        addProperty,
+        addObservable
       };
+      const isFirstTime = !initialized;
+      const postUpdates = [];
+      initialized = true;
+      const startReducer = reducers.length;
 
       describers.forEach(describer => describer(describingContext));
 
+      // call init action
+      const initializedState = reducers.slice(startReducer).reduce((state, reducer) => reducer(state, initAction, {}), currentState);
+      if (currentState !== initializedState) {
+        if (isFirstTime) {
+          currentState = initializedState;
+        } else {
+          postUpdates.push(notify);
+        }
+      }
       const debouncedUpdateProps = debounce(0, updateProps);
 
       if (linkedProps.length) {
@@ -295,6 +385,8 @@ export function store(initialState) {
       if (computedProps.length) {
         recompute();
       }
+
+      postUpdates.forEach(update => update());
     }
 
     update(describers);
@@ -319,9 +411,9 @@ export function store(initialState) {
 export function withReducer(...args) {
   return createDescriber(function (describingContext) {
     const { addReducer } = describingContext;
-    if (typeof args[0] === "function") {
+    if (typeof args[0] === 'function') {
       args.forEach(reducer => addReducer(reducer));
-    } else if (typeof args[0] === "string") {
+    } else if (typeof args[0] === 'string') {
       const prop = args.shift();
       return withReducer({
         [prop]: args
@@ -414,7 +506,7 @@ export function component(defaultComponent) {
       }
 
       function addProperty(name, descriptor, map = defaultPropMapper, options, order = 0) {
-        if (typeof map === "string") {
+        if (typeof map === 'string') {
           const propName = map;
           map = x => x[propName];
         }
@@ -430,22 +522,24 @@ export function component(defaultComponent) {
           component,
           ownedProps,
           mappedProps,
+          prevMappedProps: component.prevMappedProps || {},
           // detech prop changed
           propsChanged: component.prevProps && component.prevProps !== component.props
         };
 
         component.prevProps = component.props;
+        component.prevMappedProps = mappedProps;
 
         for (let [propName, propertyDescritor, map] of propertyDescriptors) {
           const rawPropValue = propertyDescritor(descriptionContext, propName, map);
           if (rawPropValue === ignore) continue;
           let propValue = map !== false ? map.apply(null, rawPropValue.concat([descriptionContext])) : rawPropValue;
 
-          if (typeof propValue === "function" && !propValue[isDispatcher]) {
+          if (typeof propValue === 'function' && !propValue[isDispatcher]) {
             propValue = propValue(descriptionContext);
           }
 
-          if (propName === "*") {
+          if (propName === '*') {
             Object.assign(mappedProps, propValue);
           } else {
             mappedProps[propName] = propValue;
@@ -468,15 +562,17 @@ export function component(defaultComponent) {
 
           unsubscribes.push(...stores.map(store => store.subscribe(handleChange)));
 
-          unsubscribes.push(...observables.map(observable => observable.subscribe(value => {
-            observable.__lastValue = value;
-            handleChange();
-          })));
+          unsubscribes.push(...observables.map(observable => {
+            return observable.subscribe(value => {
+              observable.__lastValue = value;
+              handleChange();
+            });
+          }));
 
           this.unsubscribe = () => unsubscribes.forEach(unsubscribe => {
-            if (unsubscribe && typeof unsubscribe.unsubscribe === "function") {
+            if (unsubscribe && typeof unsubscribe.unsubscribe === 'function') {
               unsubscribe.unsubscribe();
-            } else if (typeof unsubscribe === "function") {
+            } else if (typeof unsubscribe === 'function') {
               unsubscribe();
             }
           });
@@ -526,7 +622,7 @@ export function withProp(name, evaluatorFactory, map, options) {
 export function fromState(...props) {
   return function ({ objectType }) {
     if (objectType !== ComponentType) {
-      throw new Error("fromState can be used with component()");
+      throw new Error('fromState can be used with component()');
     }
     return function (descriptionContext) {
       const state = descriptionContext.component.state || {};
@@ -557,17 +653,19 @@ export function fromValue(factory) {
 export function fromObservable(...observables) {
   return function ({ addObservable }) {
     observables.forEach(observable => addObservable(observable));
-    return function () {
+    return Object.assign(function () {
       return observables.map(observable => observable.__lastValue);
-    };
+    }, {
+      [isObservableListener]: true
+    });
   };
 }
 
 export function fromPromise(factory, { defaultValue, shouldUpdate = noop } = {}) {
-  const loadingPayload = [defaultValue, "loading"];
+  const loadingPayload = [defaultValue, 'loading'];
   return function ({ objectType }) {
     if (objectType !== ComponentType) {
-      throw new Error("fromState can be used with component()");
+      throw new Error('fromState can be used with component()');
     }
     return function (descriptionContext, propName) {
       const { component } = descriptionContext;
@@ -582,7 +680,7 @@ export function fromPromise(factory, { defaultValue, shouldUpdate = noop } = {})
       const promise = factory(descriptionContext);
 
       if (!promise) {
-        return [defaultValue, ""];
+        return [defaultValue, ''];
       }
 
       promise.__payload = loadingPayload;
@@ -593,7 +691,7 @@ export function fromPromise(factory, { defaultValue, shouldUpdate = noop } = {})
       // handle success
       result => {
         if (component[promisePropName] === promise) {
-          component[promisePropName].__payload = [result, "success"];
+          component[promisePropName].__payload = [result, 'success'];
           // reload
           component.setState(dummyState);
         }
@@ -601,7 +699,7 @@ export function fromPromise(factory, { defaultValue, shouldUpdate = noop } = {})
       // handle failure
       error => {
         if (component[promisePropName] === promise) {
-          component[promisePropName].__payload = [defaultValue, "failure", error];
+          component[promisePropName].__payload = [defaultValue, 'failure', error];
           // reload
           component.setState(dummyState);
         }
@@ -639,7 +737,7 @@ export function withAction(name, store, ...args) {
       // is component type
       let getStore;
       // withAction('name', store.action, payloadFactory)
-      if (typeof store === "function") {
+      if (typeof store === 'function') {
         const action = store;
         if (action[StoreType]) {
           args.unshift(action);
@@ -670,10 +768,10 @@ export function withAction(name, store, ...args) {
 function addAction(describingContext, name, getStore, action, payloadFactory = defaultPayloadFactory) {
   const { addProperty } = describingContext;
 
-  if (typeof payloadFactory === "string") {
+  if (typeof payloadFactory === 'string') {
     const ownedPropName = payloadFactory;
     payloadFactory = () => ({ ownedProps }) => ownedProps[ownedPropName];
-  } else if (typeof payloadFactory !== "function") {
+  } else if (typeof payloadFactory !== 'function') {
     payloadFactory = createPayloadFactory(payloadFactory, describingContext);
   }
 
@@ -681,7 +779,7 @@ function addAction(describingContext, name, getStore, action, payloadFactory = d
     return Object.assign(function () {
       let payload = payloadFactory.apply(null, arguments);
 
-      if (typeof payload === "function") {
+      if (typeof payload === 'function') {
         payload = payload(descriptionContext, action);
       }
 
@@ -715,7 +813,7 @@ export function shallowEqual(value1, value2, ignoreFuncs) {
       for (let i = 0; i < length; i++) {
         const value1Prop = value1[i];
         const value2Prop = value2[i];
-        if (ignoreFuncs && typeof value1Prop === "function" && typeof value2Prop === "function") continue;
+        if (ignoreFuncs && typeof value1Prop === 'function' && typeof value2Prop === 'function') continue;
         if (value1Prop !== value2Prop) return false;
       }
       return true;
@@ -725,7 +823,7 @@ export function shallowEqual(value1, value2, ignoreFuncs) {
     for (let key of value1Keys) {
       const value1Prop = value1[key];
       const value2Prop = value2[key];
-      if (ignoreFuncs && typeof value1Prop === "function" && typeof value2Prop === "function") continue;
+      if (ignoreFuncs && typeof value1Prop === 'function' && typeof value2Prop === 'function') continue;
       if (value1Prop !== value2Prop) return false;
     }
     return true;
@@ -762,6 +860,32 @@ export function selector(...funcs) {
   return function (...args) {
     const mappedArgs = argSelectors.map(x => x.apply(null, args));
     return wrapper.apply(null, mappedArgs);
+  };
+}
+
+export function reduxReducer(reducer) {
+  return function (state, action, payload) {
+    if (isPlainObject(payload)) {
+      const reduxAction = _extends({}, payload, {
+        type: action
+      });
+
+      return reducer(state, reduxAction);
+    }
+    return state;
+  };
+}
+
+export function reduxMiddleware(middleware) {
+  return store => next => (action, payload) => {
+    if (isPlainObject(payload)) {
+      return middleware(store)(reduxAction => {
+        return next(action.type, action);
+      })(_extends({}, payload, {
+        type: action
+      }));
+    }
+    return next(action, payload);
   };
 }
 //# sourceMappingURL=index.js.map

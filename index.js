@@ -1,21 +1,21 @@
-import React from "react";
+import React from 'react';
 
-export const ComponentType = Symbol("Component");
-export const StoreType = Symbol("Store");
-const initAction = Symbol("InitAction");
+export const ComponentType = Symbol('Component');
+export const StoreType = Symbol('Store');
+const initAction = Symbol('InitAction');
 const defaultPropMapper = x => x;
 const defaultPayloadFactory = (context, firstArg) => firstArg;
 const dummyState = {};
-const unsafeSetState = Symbol("SetState");
-const unsafeUpdate = Symbol("Update");
-const isDispatcher = Symbol("Dispatcher");
-const isDescriber = Symbol("Describer");
-const isAction = Symbol("Action");
-const ignore = Symbol("Ignore");
-const isObservableListener = Symbol("ObservableListener");
+const unsafeSetState = Symbol('SetState');
+const unsafeUpdate = Symbol('Update');
+const isDispatcher = Symbol('Dispatcher');
+const isDescriber = Symbol('Describer');
+const isAction = Symbol('Action');
+const ignore = Symbol('Ignore');
+const isObservableListener = Symbol('ObservableListener');
 const noop = () => undefined;
 const isPlainObject = val =>
-  !!val && typeof val === "object" && val.constructor === Object;
+  !!val && typeof val === 'object' && val.constructor === Object;
 
 let subscriptionUniqueId = 1;
 
@@ -35,7 +35,7 @@ export function update(target, ...describers) {
       )
     );
   }
-  throw new Error("Target object does not support update");
+  throw new Error('Target object does not support update');
 }
 
 export function createDescriber(f) {
@@ -199,12 +199,12 @@ export function store(initialState) {
         return;
       }
 
-      if (typeof map !== "function" && map !== false) {
+      if (typeof map !== 'function' && map !== false) {
         // create linked prop
         if (!stores.length) {
-          throw new Error("At least store required to create linked prop");
+          throw new Error('At least store required to create linked prop');
         } else if (stores.length > 1) {
-          throw new Error("Linked prop requires only a store");
+          throw new Error('Linked prop requires only a store');
         }
         linkedProps.push([name, stores[0], map, options]);
         stores.length = 0;
@@ -248,7 +248,7 @@ export function store(initialState) {
           return reducers.reduce((state, reducer) => {
             const reducerResult = reducer(state, action, payload);
             // support lazy dispatching inside reducer
-            if (typeof reducerResult === "function") {
+            if (typeof reducerResult === 'function') {
               reducerResult((...args) => pendingDispatchings.push(args));
               return state;
             }
@@ -280,14 +280,14 @@ export function store(initialState) {
         return;
       }
       let actionResult = action(payload);
-      if (typeof actionResult === "function") {
+      if (typeof actionResult === 'function') {
         actionResult = actionResult(currentState);
-        if (typeof actionResult === "function") {
+        if (typeof actionResult === 'function') {
           actionResult = actionResult(dispatch, getState);
           return actionResult;
         } else {
           // new state
-          if (actionResult && typeof actionResult.then === "function") {
+          if (actionResult && typeof actionResult.then === 'function') {
             return actionResult.then(setState);
           } else {
             setState(actionResult);
@@ -444,9 +444,9 @@ export function store(initialState) {
 export function withReducer(...args) {
   return createDescriber(function(describingContext) {
     const { addReducer } = describingContext;
-    if (typeof args[0] === "function") {
+    if (typeof args[0] === 'function') {
       args.forEach(reducer => addReducer(reducer));
-    } else if (typeof args[0] === "string") {
+    } else if (typeof args[0] === 'string') {
       const prop = args.shift();
       return withReducer({
         [prop]: args
@@ -554,7 +554,7 @@ export function component(defaultComponent) {
         options,
         order = 0
       ) {
-        if (typeof map === "string") {
+        if (typeof map === 'string') {
           const propName = map;
           map = x => x[propName];
         }
@@ -570,12 +570,14 @@ export function component(defaultComponent) {
           component,
           ownedProps,
           mappedProps,
+          prevMappedProps: component.prevMappedProps || {},
           // detech prop changed
           propsChanged:
             component.prevProps && component.prevProps !== component.props
         };
 
         component.prevProps = component.props;
+        component.prevMappedProps = mappedProps;
 
         for (let [propName, propertyDescritor, map] of propertyDescriptors) {
           const rawPropValue = propertyDescritor(
@@ -589,11 +591,11 @@ export function component(defaultComponent) {
               ? map.apply(null, rawPropValue.concat([descriptionContext]))
               : rawPropValue;
 
-          if (typeof propValue === "function" && !propValue[isDispatcher]) {
+          if (typeof propValue === 'function' && !propValue[isDispatcher]) {
             propValue = propValue(descriptionContext);
           }
 
-          if (propName === "*") {
+          if (propName === '*') {
             Object.assign(mappedProps, propValue);
           } else {
             mappedProps[propName] = propValue;
@@ -633,10 +635,10 @@ export function component(defaultComponent) {
               unsubscribes.forEach(unsubscribe => {
                 if (
                   unsubscribe &&
-                  typeof unsubscribe.unsubscribe === "function"
+                  typeof unsubscribe.unsubscribe === 'function'
                 ) {
                   unsubscribe.unsubscribe();
-                } else if (typeof unsubscribe === "function") {
+                } else if (typeof unsubscribe === 'function') {
                   unsubscribe();
                 }
               });
@@ -693,7 +695,7 @@ export function withProp(name, evaluatorFactory, map, options) {
 export function fromState(...props) {
   return function({ objectType }) {
     if (objectType !== ComponentType) {
-      throw new Error("fromState can be used with component()");
+      throw new Error('fromState can be used with component()');
     }
     return function(descriptionContext) {
       const state = descriptionContext.component.state || {};
@@ -739,10 +741,10 @@ export function fromPromise(
   factory,
   { defaultValue, shouldUpdate = noop } = {}
 ) {
-  const loadingPayload = [defaultValue, "loading"];
+  const loadingPayload = [defaultValue, 'loading'];
   return function({ objectType }) {
     if (objectType !== ComponentType) {
-      throw new Error("fromState can be used with component()");
+      throw new Error('fromState can be used with component()');
     }
     return function(descriptionContext, propName) {
       const { component } = descriptionContext;
@@ -758,7 +760,7 @@ export function fromPromise(
       const promise = factory(descriptionContext);
 
       if (!promise) {
-        return [defaultValue, ""];
+        return [defaultValue, ''];
       }
 
       promise.__payload = loadingPayload;
@@ -769,7 +771,7 @@ export function fromPromise(
         // handle success
         result => {
           if (component[promisePropName] === promise) {
-            component[promisePropName].__payload = [result, "success"];
+            component[promisePropName].__payload = [result, 'success'];
             // reload
             component.setState(dummyState);
           }
@@ -779,7 +781,7 @@ export function fromPromise(
           if (component[promisePropName] === promise) {
             component[promisePropName].__payload = [
               defaultValue,
-              "failure",
+              'failure',
               error
             ];
             // reload
@@ -824,7 +826,7 @@ export function withAction(name, store, ...args) {
       // is component type
       let getStore;
       // withAction('name', store.action, payloadFactory)
-      if (typeof store === "function") {
+      if (typeof store === 'function') {
         const action = store;
         if (action[StoreType]) {
           args.unshift(action);
@@ -868,10 +870,10 @@ function addAction(
 ) {
   const { addProperty } = describingContext;
 
-  if (typeof payloadFactory === "string") {
+  if (typeof payloadFactory === 'string') {
     const ownedPropName = payloadFactory;
     payloadFactory = () => ({ ownedProps }) => ownedProps[ownedPropName];
-  } else if (typeof payloadFactory !== "function") {
+  } else if (typeof payloadFactory !== 'function') {
     payloadFactory = createPayloadFactory(payloadFactory, describingContext);
   }
 
@@ -882,7 +884,7 @@ function addAction(
         function() {
           let payload = payloadFactory.apply(null, arguments);
 
-          if (typeof payload === "function") {
+          if (typeof payload === 'function') {
             payload = payload(descriptionContext, action);
           }
 
@@ -922,8 +924,8 @@ export function shallowEqual(value1, value2, ignoreFuncs) {
         const value2Prop = value2[i];
         if (
           ignoreFuncs &&
-          typeof value1Prop === "function" &&
-          typeof value2Prop === "function"
+          typeof value1Prop === 'function' &&
+          typeof value2Prop === 'function'
         )
           continue;
         if (value1Prop !== value2Prop) return false;
@@ -937,8 +939,8 @@ export function shallowEqual(value1, value2, ignoreFuncs) {
       const value2Prop = value2[key];
       if (
         ignoreFuncs &&
-        typeof value1Prop === "function" &&
-        typeof value2Prop === "function"
+        typeof value1Prop === 'function' &&
+        typeof value2Prop === 'function'
       )
         continue;
       if (value1Prop !== value2Prop) return false;
