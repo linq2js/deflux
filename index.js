@@ -4,7 +4,7 @@ export const ComponentType = Symbol('Component');
 export const StoreType = Symbol('Store');
 const initAction = Symbol('InitAction');
 const defaultPropMapper = x => x;
-const defaultPayloadFactory = (context, firstArg) => firstArg;
+const defaultPayloadFactory = firstArg => firstArg;
 const dummyState = {};
 const unsafeSetState = Symbol('SetState');
 const unsafeUpdate = Symbol('Update');
@@ -744,7 +744,7 @@ export function fromPromise(
   const loadingPayload = [defaultValue, 'loading'];
   return function({ objectType }) {
     if (objectType !== ComponentType) {
-      throw new Error('fromState can be used with component()');
+      throw new Error('fromPromise can be used with component()');
     }
     return function(descriptionContext, propName) {
       const { component } = descriptionContext;
