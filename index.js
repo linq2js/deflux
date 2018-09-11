@@ -1,8 +1,8 @@
 import React from "react";
 
-const symbolId = new Date().getTime();
-const createSymbol = name =>
-  typeof Symbol === "undefined" ? name + symbolId : Symbol(name);
+const symbolId = new Date().getTime().toString(36);
+const createSymbol =
+  typeof Symbol === "undefined" ? name => name + symbolId : Symbol;
 export const ComponentType = createSymbol("Component");
 export const StoreType = createSymbol("Store");
 const initAction = createSymbol("InitAction");
@@ -87,7 +87,7 @@ export function store(initialState) {
     function recompute() {
       const prevState = currentState;
       const descriptionContext = {
-        ownedProps: currentState
+        ownProps: currentState
       };
       for (let [name, evaluator, computer] of computedProps) {
         const nextValue = computer.apply(null, evaluator(descriptionContext));
@@ -567,11 +567,11 @@ export function component(defaultComponent) {
         propertyDescriptors.sort((a, b) => a[4] - b[4]);
       }
 
-      function mapProps(component, ownedProps) {
+      function mapProps(component, ownProps) {
         const mappedProps = {};
         const descriptionContext = {
           component,
-          ownedProps,
+          ownProps,
           mappedProps,
           prevMappedProps: component.prevMappedProps || {},
           // detech prop changed
@@ -803,8 +803,8 @@ export function fromPromise(
  */
 export function fromProp(...propNames) {
   return function() {
-    return function({ ownedProps }) {
-      return propNames.map(propName => ownedProps[propName]);
+    return function({ ownProps }) {
+      return propNames.map(propName => ownProps[propName]);
     };
   };
 }
@@ -875,7 +875,7 @@ function addAction(
 
   if (typeof payloadFactory === "string") {
     const ownedPropName = payloadFactory;
-    payloadFactory = () => ({ ownedProps }) => ownedProps[ownedPropName];
+    payloadFactory = () => ({ ownProps }) => ownProps[ownedPropName];
   } else if (typeof payloadFactory !== "function") {
     payloadFactory = createPayloadFactory(payloadFactory, describingContext);
   }

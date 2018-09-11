@@ -11,7 +11,7 @@ A declarative FLUX architecture for React
 1.  Support linked props
 1.  Support computed props
 1.  Support wired actions for store
-1.  Support many prop sources: Store, Owned props, State, Promise, Literal
+1.  Support many prop sources: Store, Own Props, State, Promise, Literal
 1.  Update store props/reducers/middleware on demand
 1.  Compatible with Redux store/reducer/middleware
 1.  Compatible with Rxjs
@@ -163,7 +163,7 @@ const Component = create(
 ```
 
 You can pass payloadFactory to produce new payload from calling context and input args.
-Calling context has some props: ownedProps (the original props retrieved from parent component),
+Calling context has some props: ownProps (the original props retrieved from parent component),
 mappedProps (the props that component will be used to render)
 payloadFactory has prototype:<br/>
 (arg1, arg2, ...) => payload.
@@ -175,7 +175,7 @@ withAction(
   MyStore,
   MyAction,
   (arg1, arg2, arg3) => callingContext =>
-    arg1 + arg3 + callingContext.ownedProps.name
+    arg1 + arg3 + callingContext.ownProps.name
 );
 ```
 
