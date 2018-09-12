@@ -1,8 +1,7 @@
 import React from "react";
 
 const symbolId = new Date().getTime().toString(36);
-const createSymbol =
-  typeof Symbol === "undefined" ? name => name + symbolId : Symbol;
+const createSymbol = name => name + symbolId;
 export const ComponentType = createSymbol("Component");
 export const StoreType = createSymbol("Store");
 const initAction = createSymbol("InitAction");
